@@ -24,6 +24,7 @@ from typing import Any, ClassVar
 import pyarrow as pa
 import torch
 import torchvision
+from torchcodec.decoders import SimpleVideoDecoder
 from datasets.features.features import register_feature
 
 
@@ -51,20 +52,20 @@ def load_from_videos(
                 raise NotImplementedError("All video paths are expected to be the same for now.")
             video_path = data_dir / paths[0]
 
-            frames = decode_video_frames_torchvision(video_path, timestamps, tolerance_s, backend)
+            frames = decode_video_frames_torchvision_torchcodec(video_path, timestamps, tolerance_s, backend)
             item[key] = frames
         else:
             # load one frame
             timestamps = [item[key]["timestamp"]]
             video_path = data_dir / item[key]["path"]
 
-            frames = decode_video_frames_torchvision(video_path, timestamps, tolerance_s, backend)
+            frames = decode_video_frames_torchvision_torchcodec(video_path, timestamps, tolerance_s, backend)
             item[key] = frames[0]
 
     return item
 
 
-def decode_video_frames_torchvision(
+def decode_video_frames_torchvision_torchcodec(
     video_path: str,
     timestamps: list[float],
     tolerance_s: float,
@@ -92,45 +93,56 @@ def decode_video_frames_torchvision(
     """
     video_path = str(video_path)
 
-    # set backend
-    keyframes_only = False
-    torchvision.set_video_backend(backend)
-    if backend == "pyav":
-        keyframes_only = True  # pyav doesnt support accuracte seek
+    if backend == "torchcodec":
+        decoder = SimpleVideoDecoder(video_path)
+        start, stop = timestamps[0], timestamps[-1]
+        if start == stop:
+            loaded_frame, loaded_ts, _ = decoder.get_frame_displayed_at(seconds=start)
+            loaded_frames = [loaded_frame]
+            loaded_ts = [loaded_ts]
+        else:
+            loaded_frames, loaded_ts, _ = decoder.get_frames_displayed_at(start_seconds=start, stop_seconds=stop)
+            loaded_ts = loaded_ts.to(torch.float32)  # from float64
+    else:
+        # set backend
+        keyframes_only = False
+        torchvision.set_video_backend(backend)
+        if backend == "pyav":
+            keyframes_only = True  # pyav doesnt support accuracte seek
 
-    # set a video stream reader
-    # TODO(rcadene): also load audio stream at the same time
-    reader = torchvision.io.VideoReader(video_path, "video")
+        # set a video stream reader
+        # TODO(rcadene): also load audio stream at the same time
+        reader = torchvision.io.VideoReader(video_path, "video")
 
-    # set the first and last requested timestamps
-    # Note: previous timestamps are usually loaded, since we need to access the previous key frame
-    first_ts = timestamps[0]
-    last_ts = timestamps[-1]
+        # set the first and last requested timestamps
+        # Note: previous timestamps are usually loaded, since we need to access the previous key frame
+        first_ts = timestamps[0]
+        last_ts = timestamps[-1]
 
-    # access closest key frame of the first requested frame
-    # Note: closest key frame timestamp is usally smaller than `first_ts` (e.g. key frame can be the first frame of the video)
-    # for details on what `seek` is doing see: https://pyav.basswood-io.com/docs/stable/api/container.html?highlight=inputcontainer#av.container.InputContainer.seek
-    reader.seek(first_ts, keyframes_only=keyframes_only)
+        # access closest key frame of the first requested frame
+        # Note: closest key frame timestamp is usally smaller than `first_ts` (e.g. key frame can be the first frame of the video)
+        # for details on what `seek` is doing see: https://pyav.basswood-io.com/docs/stable/api/container.html?highlight=inputcontainer#av.container.InputContainer.seek
+        reader.seek(first_ts, keyframes_only=keyframes_only)
 
-    # load all frames until last requested frame
-    loaded_frames = []
-    loaded_ts = []
-    for frame in reader:
-        current_ts = frame["pts"]
-        if log_loaded_timestamps:
-            logging.info(f"frame loaded at timestamp={current_ts:.4f}")
-        loaded_frames.append(frame["data"])
-        loaded_ts.append(current_ts)
-        if current_ts >= last_ts:
-            break
+        # load all frames until last requested frame
+        loaded_frames = []
+        loaded_ts = []
+        for frame in reader:
+            current_ts = frame["pts"]
+            if log_loaded_timestamps:
+                logging.info(f"frame loaded at timestamp={current_ts:.4f}")
+            loaded_frames.append(frame["data"])
+            loaded_ts.append(current_ts)
+            if current_ts >= last_ts:
+                break
 
-    if backend == "pyav":
-        reader.container.close()
+        if backend == "pyav":
+            reader.container.close()
 
-    reader = None
+        reader = None
 
-    query_ts = torch.tensor(timestamps)
     loaded_ts = torch.tensor(loaded_ts)
+    query_ts = torch.tensor(timestamps)
 
     # compute distances between each query timestamp and timestamps of all loaded frames
     dist = torch.cdist(query_ts[:, None], loaded_ts[:, None], p=1)

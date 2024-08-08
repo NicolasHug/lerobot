@@ -37,7 +37,7 @@ from tqdm import tqdm
 
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.common.datasets.video_utils import (
-    decode_video_frames_torchvision,
+    decode_video_frames_torchvision_torchcodec,
     encode_video_frames,
 )
 from lerobot.common.utils.benchmark import TimeBenchmark
@@ -153,8 +153,8 @@ def decode_video_frames(
     tolerance_s: float,
     backend: str,
 ) -> torch.Tensor:
-    if backend in ["pyav", "video_reader"]:
-        return decode_video_frames_torchvision(video_path, timestamps, tolerance_s, backend)
+    if backend in ["pyav", "video_reader", "torchcodec"]:
+        return decode_video_frames_torchvision_torchcodec(video_path, timestamps, tolerance_s, backend)
     else:
         raise NotImplementedError(backend)
 
