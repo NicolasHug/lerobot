@@ -95,15 +95,8 @@ def decode_video_frames_torchvision_torchcodec(
 
     if backend == "torchcodec":
         decoder = SimpleVideoDecoder(video_path)
-        start, stop = timestamps[0], timestamps[-1]
-        if start == stop:
-            loaded_frame, loaded_ts, _ = decoder.get_frame_displayed_at(seconds=start)
-            loaded_frames = [loaded_frame]
-            loaded_ts = [loaded_ts]
-        else:
-            loaded_frames, loaded_ts, _ = decoder.get_frames_displayed_at(start_seconds=start, stop_seconds=stop)
-            loaded_ts = loaded_ts.to(torch.float32)  # from float64
-    else:
+        loaded_frames, loaded_ts, _ = zip(*[decoder.get_frame_displayed_at(ts) for ts in timestamps])
+    if backend != "torchcodec":
         # set backend
         keyframes_only = False
         torchvision.set_video_backend(backend)

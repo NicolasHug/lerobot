@@ -375,7 +375,9 @@ def main(
                         )
 
             # Save intermediate results
+            print(benchmark_table)
             benchmark_df = pd.DataFrame(benchmark_table, columns=headers)
+            print(benchmark_df["crf"].unique())
             now = dt.datetime.now()
             csv_path = (
                 output_dir
